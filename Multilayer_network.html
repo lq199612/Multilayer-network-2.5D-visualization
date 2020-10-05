@@ -1,0 +1,783 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <title>Multilayer network 2.5D visualization</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+</head>
+<link rel="stylesheet" href="../css/element.css">
+<script src="../js/three.js"></script>
+<script src="../js/OrbitControls.js"></script>
+<script src="../js/SpinControls.js"></script>
+<script src="../js/d3v5.js"></script>
+<script src="../js/d3v3.js"></script>
+<script src="../js/lodash.js"></script>
+<script src="../js/vue.js"></script>
+<script src="../js/elementUI.js"></script>
+<script src="../js/echarts.min.js"></script>
+<style>
+    .left {
+        z-index: 1;
+        width: 50%;
+        height: 40%;
+        float: left;
+        word-wrap: break-word;
+    }
+
+    .right {
+        float: right;
+        position: relative;
+        height: 1400px;
+        width: 48%;
+    }
+
+    .egoNetChart {
+        float: right;
+        position: relative;
+        height: 30%;
+        width: 60%;
+    }
+
+    .bar {
+        z-index: 1;
+        float: left;
+        width: 40%;
+        height: 30%;
+    }
+
+    .table {
+        width: 100%;
+        height: 70%;
+    }
+
+    .outbox {
+        overflow-y: auto;
+    }
+</style>
+
+<body>
+
+    <div id="ThreeJS" class='left'></div>
+    <div class='right' id="app">
+        <div id='barChart' class="bar">
+            <!-- use echartjs to draw the bar chart -->
+            <!-- <svg id='barsvg' style="width: 100%;height: 100%;" ref='barsvg'> -->
+            <!-- <rect v-for='rect in rects' :x='rect.x' :y='rect.y' :width='rect.width' :height='rect.height'
+                        :fill='rect.fill'></rect> -->
+            <!-- </svg> -->
+        </div>
+        <div class='egoNetChart'>
+            <svg ref='egoNetsvg' style="width: 100%;height: 100%;">
+                <g v-for='circle in circleData.nodePos'>
+                    <circle :cx='circle[`pos`][0]' :cy='circle[`pos`][1]' :r='r' :fill='circle[`fill`]'></circle>
+                    <text :x='textPosTf(circle)[0]' :y='textPosTf(circle)[1]'>{{circle['nodeId']}}</text>
+                </g>
+                <line v-for='line in circleData.edgePos' :x1='line[`source`][`pos`][0]' :y1='line[`source`][`pos`][1]'
+                    :x2='line[`target`][`pos`][0]' :y2='line[`target`][`pos`][1]' stroke='red' :stroke-width='1'
+                    opacity='0.5'></line>
+                <text v-for='text in circleData.textPos' :x='text[`pos`][0]'
+                    :y='text[`pos`][1]'>{{text['layer']}}</text>
+            </svg>
+        </div>
+        <div class="table outbox">
+            <el-table :data="tableData" style="width: 100%;margin-bottom: 20px;" row-key="id_" border
+                :tree-props="{children: 'children', hasChildren: 'hasChildren'}" @cell-click='handleCellClick'>
+                <el-table-column prop="id" label="node" sortable>
+                </el-table-column>
+                <el-table-column prop="layer" label="layer" sortable>
+                </el-table-column>
+                <el-table-column prop="Degree" label="degree" sortable>
+                </el-table-column>
+                <el-table-column prop="weight" label="weight" sortable>
+                </el-table-column>
+                <el-table-column prop="links_" label="neighbor" sortable>
+                </el-table-column>
+            </el-table>
+        </div>
+    </div>
+
+
+    <script>
+
+        async function fetchAllData() {
+            const nodes = await d3v5.json('./data/london_station_nodes.json')
+            const links = await d3v5.json('./data/london_station_links.json')
+            const matrix = await d3v5.json('./data/matrix.json')
+            return { nodes, links, matrix }
+        }
+        // draw 2.5 Multilayer network
+        fetchAllData().then(({ nodes, links, matrix }) => {
+            var clock = new THREE.Clock();
+            var group;
+            var nodes, links
+            const div = document.getElementById('ThreeJS')
+            var CANVAS_WIDTH = div.clientWidth, CANVAS_HEIGHT = window.innerHeight;
+            const thelts = [0.295, -0.29, -0.5]
+            const m = new Map()
+            const edgeMap = new Map()
+            const { renderer, scene, controls, camera } = init()
+            layout(nodes, links, matrix)
+
+            animate();
+            function init() {
+                const scene = new THREE.Scene();
+                //Camera  
+                // var SCREEN_WIDTH = window.innerWidth, SCREEN_HEIGHT = window.innerHeight;
+                var VIEW_ANGLE = 30, ASPECT = CANVAS_WIDTH / CANVAS_HEIGHT, NEAR = 0.1, FAR = 20000;
+
+                const camera = new THREE.PerspectiveCamera(VIEW_ANGLE, ASPECT, NEAR, FAR);
+                scene.add(camera);
+                camera.position.set(0, 150, 400);
+                // Renderer	
+                const renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer.setSize(CANVAS_WIDTH, CANVAS_HEIGHT);
+                container = document.getElementById('ThreeJS');
+                container.appendChild(renderer.domElement);
+                // Adding orbital controls
+                const controls = new THREE.OrbitControls(camera, renderer.domElement);
+                // Creating a light source
+                var light = new THREE.PointLight(0xffffff);
+                light.position.set(0, 250, 0);
+                scene.add(light);
+                var ambientLight = new THREE.AmbientLight(0x111111);
+                scene.add(ambientLight);
+                // Axes
+                var axes = new THREE.AxisHelper(100);
+                // scene.add(axes);
+                // "background"
+                var skyBoxGeometry = new THREE.CubeGeometry(10000, 10000, 10000);
+                var skyBoxMaterial = new THREE.MeshBasicMaterial({ color: 'white', side: THREE.BackSide });
+                var skyBox = new THREE.Mesh(skyBoxGeometry, skyBoxMaterial);
+                scene.add(skyBox);
+
+                group = new THREE.Group();
+                scene.add(group);
+
+                const debounced = _.throttle(onDocumentMouseMove, 100)
+                window.addEventListener("mousemove", debounced, false);
+                // window.addEventListener("mousemove", onDocumentMouseMove, false);
+                return { renderer, scene, controls, camera }
+            }
+            function layout(nodes, links) {
+                // The network
+                const k = 55
+                const sphereCircle = 0.5
+                const linkRough = 0.08
+                const group1 = new THREE.Group(), group2 = new THREE.Group();
+                const { planes } = addPlane(nodes, k)
+                let center = planes[1].position
+                scene.position.set(-center.x, -center.y, -center.z)
+                camera.lookAt(scene.position)
+                nodes.forEach(({ list, name }, i) => {
+                    const xExtent = d3.extent(list, d => d[0] * k)
+                    const yExtent = d3.extent(list, d => d[1] * k)
+                    let { x, y, z } = planes[i].position
+                    let p = [x, y, z]
+                    let q = [x, 0, z]
+                    let thelt = (thelts[i] / Math.abs(thelts[i]) * (0.5 - Math.abs(thelts[i]))) * Math.PI
+                    list.forEach(({ id, pos }) => {
+                        let [x, z, y] = pos
+                        let node = getNode(x * k, y * k, z * k, sphereCircle)
+                        node.name = `node:${id}`
+                        let rotation = false
+                        let newPos
+                        if (rotation) {
+                            newPos = anyAxesRotation(p, q, node, thelt)
+                        }
+                        else {
+                            newPos = node
+                        }
+                        m.set(id, [newPos.position.x, newPos.position.y, newPos.position.z])
+                        // m.set(id, [newPos.position.x, newPos.position.y, newPos.position.z])
+                        group1.add(node);
+                    })
+                })
+                group.add(group1);
+
+                links.forEach(({ source, target }, i) => {
+                    source_ = m.get(source)
+                    target_ = m.get(target)
+                    let [x1, y1, z1] = source_
+                    let [x2, y2, z2] = target_
+                    let link = getLink(x1, y1, z1, x2, y2, z2, linkRough)
+                    link.name = source + '-' + target
+                    group2.add(link);
+                })
+                group.add(group2);
+            }
+
+            // Plot a link
+            function getLink(x1, y1, z1, x2, y2, z2, radius) {
+                var lightMaterial = new THREE.MeshLambertMaterial({ color: 0xcccc00, side: THREE.DoubleSide, transparent: true, opacity: 0.75 });
+
+                pointX = new THREE.Vector3(x1, y1, z1);
+                pointY = new THREE.Vector3(x2, y2, z2);
+
+                var direction = new THREE.Vector3().subVectors(pointY, pointX);
+                // var direction = new THREE.Vector3().subVectors(pointX, pointY);
+
+                var arrow = new THREE.ArrowHelper(direction.clone().normalize(), pointX, direction.length());
+
+                var edgeGeometry = new THREE.CylinderGeometry(radius, radius, direction.length(), 6, 4);
+
+                var edgeMesh = new THREE.Mesh(edgeGeometry, new THREE.MeshBasicMaterial({ color: 0x0000ff }));
+                edgeMesh.position.copy(new THREE.Vector3(0, 0, 0).addVectors(pointX, direction.multiplyScalar(0.5)));
+                edgeMesh.setRotationFromEuler(arrow.rotation);
+
+                edgeMesh.material = lightMaterial;
+
+                return edgeMesh;
+            }
+
+            function getPlane(x, y, z, w, h, a) {
+                var geometry = new THREE.PlaneGeometry(w, h, 1, 1);
+                var material = new THREE.MeshBasicMaterial({ color: '#E1F0FA', side: THREE.DoubleSide, transparent: true, opacity: 0.7 });  //#4d5053
+                var plane = new THREE.Mesh(geometry, material);
+                // plane.rotation.y = a * Math.PI
+                plane.rotation.x = -0.5 * Math.PI
+                plane.position.set(x, y, z)
+                return plane
+            }
+            function addPlane(nodes, k) {
+                const planePos = []
+                const planes = []
+                const group3 = new THREE.Group();
+                group.add(group3);
+                nodes.forEach(({ list, name }) => {
+                    const xExtent = d3.extent(list, d => d['pos'][0])
+                    const yExtent = d3.extent(list, d => d['pos'][1])
+                    const planeX = d3.sum(xExtent) / 2
+                    const planeY = d3.sum(yExtent) / 2
+                    const planeZ = d3.max(list, d => d['pos'][2])
+                    const minSize = 0.5
+                    planePos.push([planeX, planeY, planeZ, xExtent[1] - xExtent[0] > minSize ? xExtent[1] - xExtent[0] : minSize, (yExtent[1] - yExtent[0] > minSize ? yExtent[1] - yExtent[0] : minSize)])
+                })
+                const maxXEtent = d3.max(planePos, d => d[3])
+                const maxYEtent = d3.max(planePos, d => d[4])
+                const meanX = d3.mean(planePos, d => d[0])
+                const meanY = d3.mean(planePos, d => d[1])
+                const meanZ = d3.mean(planePos, d => d[2])
+                nodes.forEach((d, i) => {
+                    let [planeX, planeY, planeZ] = planePos[i]
+                    let plane = getPlane(meanX * k, planeZ * k, meanY * k, maxXEtent * k * 1.7, maxYEtent * k * 1.5, thelts[i])
+                    plane.name = `plane-${i + 1}`
+                    group3.add(plane);
+                    planes.push(plane)
+                })
+                return { planes }
+            }
+            // Plot a node
+            function getNode(x, y, z, r) {
+                var sphereGeometry = new THREE.SphereGeometry(r, 16, 8);
+                var sphereMaterial = new THREE.MeshLambertMaterial({ color: 0x8888ff });
+                var sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+                sphere.position.set(x, y, z);
+                return sphere;
+            }
+
+            function animate() {
+                requestAnimationFrame(animate);
+                render();
+                update();
+            }
+
+            function update() {
+                var delta = clock.getDelta();
+                controls.update();
+            }
+
+            function render() {
+                renderer.render(scene, camera);
+            }
+
+            var selectedObject = [];
+            var preColor = [];
+            function onDocumentMouseMove(event) {
+                event.preventDefault();
+                if (selectedObject.length) {
+                    preColor.forEach((color, i) => {
+                        selectedObject[i].material.color = color
+                    })
+                    selectedObject = [];
+                    preColor = []
+
+                }
+                var intersects = getIntersects(event.layerX, event.layerY);
+                if (intersects.length > 0 && selectedObject != intersects[0].object) {
+                    var res = intersects.filter(function (res) {
+                        return res && res.object;
+                    })[0];
+                    if (res && res.object) {
+                        if (!preColor.length) {
+                            selectedObject.push(res.object)
+                            preColor.push(res.object.material.color.clone())
+                            // plane #DEE9D2  node #f00
+                            if (res.object.name.indexOf('plane') != -1) {
+                                res.object.material.color.set('#DEE9D2');
+                            }
+                            if (res.object.name.indexOf('node') != -1) {
+                                let nodeId = parseInt(res.object.name.split('-')[1])
+                                let neighborNames = []
+                                let neighborLinks = []
+                                matrix[nodeId].forEach((layers, neighbor) => {
+                                    if (layers != 0) {
+                                        layers.forEach(layer => {
+                                            let neighborName = `${layer}-${neighbor}`
+                                            neighborNames.push(neighborName)
+                                            neighborLinks.push({ source: `${layer}-${nodeId}`, target: `${layer}-${neighbor}` })
+                                            neighborLinks.push({ source: `${layer}-${neighbor}`, target: `${layer}-${nodeId}` })
+                                        })
+                                    }
+                                })
+
+                                // [...m.keys()]  
+                                const nodeSet = [...m.keys()]
+                                nodeSet.forEach(idName => {
+                                    if (neighborNames.indexOf(idName) != -1) {
+                                        let neighborNode = scene.getObjectByName('node:' + idName)
+                                        selectedObject.push(neighborNode)
+                                        preColor.push(neighborNode.material.color.clone())
+                                        neighborNode.material.color.set('#f00');
+                                    }
+                                    else {
+                                        let neighborNode = scene.getObjectByName('node:' + idName)
+                                        selectedObject.push(neighborNode)
+                                        preColor.push(neighborNode.material.color.clone())
+                                        neighborNode.material.color.set('#A8A8A8');
+                                    }
+                                })
+                                neighborLinks.forEach(({ source, target }) => {
+                                    edgeMap.set(source, target)
+                                })
+                                links.forEach(({ source, target }) => {
+                                    if (edgeMap.has(source) && target == edgeMap.get(source)) {
+                                        let link = scene.getObjectByName(source + '-' + target)
+                                        selectedObject.push(link)
+                                        preColor.push(link.material.color.clone())
+                                        link.material.color.set('#f00')
+                                    }
+                                    else {
+                                        let link = scene.getObjectByName(source + '-' + target)
+                                        selectedObject.push(link)
+                                        preColor.push(link.material.color.clone())
+                                        link.material.color.set('white')
+                                    }
+                                })
+                                res.object.material.color.set('#f00');
+                            }
+
+
+                        }
+                    }
+                }
+            }
+            var raycaster = new THREE.Raycaster();
+            var mouseVector = new THREE.Vector3();
+            function getIntersects(x, y) {
+                x = (x / CANVAS_WIDTH) * 2 - 1;
+                y = - (y / CANVAS_HEIGHT) * 2 + 1;
+                mouseVector.set(x, y, 0.5);
+                raycaster.setFromCamera(mouseVector, camera);
+                return raycaster.intersectObject(group, true);
+            }
+            function anyAxesRotation(p, q, obj, thelt) {
+                let m = new THREE.Matrix4()
+                let sin = Math.sin(thelt)
+                let cos = Math.cos(thelt)
+                let direction = q.map((d, i) => d - p[i])
+                let sum_p = Math.sqrt(d3.sum(direction, d => d * d))
+                let dd = direction.map(d => d / sum_p)  // normalize d
+                let [u, v, w] = dd
+                let u2 = u * u
+                let v2 = v * v
+                let w2 = w * w
+                let x = 0
+                let y = 0
+                let z = 0
+                m.set(
+                    u2 + (v2 + w2) * cos, u * v * (1 - cos) - w * sin, u * w * (1 - cos) + v * sin, x,
+                    u * v * (1 - cos) + w * sin, v2 + (u2 + w2) * cos, v * w * (1 - cos) - u * sin, y,
+                    u * w * (1 - cos) - v * sin, v * w * (1 - cos) + u * sin, w2 + (u2 + v2) * cos, z,
+                    0, 0, 0, 1
+                )
+                let [x_, y_, z_] = [-q[0], 0, -q[2]]
+                let [x__, y__, z__] = [q[0], 0, q[2]]
+                let m_ = new THREE.Matrix4().set(
+                    1, 0, 0, x_,
+                    0, 1, 0, y_,
+                    0, 0, 1, z_,
+                    0, 0, 0, 1
+                )
+                let m__ = new THREE.Matrix4().set(
+                    1, 0, 0, x__,
+                    0, 1, 0, y__,
+                    0, 0, 1, z__,
+                    0, 0, 0, 1
+                )
+                var currentPos = new THREE.Vector4(obj.position.x, obj.position.y, obj.position.z, 1);
+                var newPos = currentPos.applyMatrix4(m_);
+                newPos = currentPos.applyMatrix4(m);
+                newPos = newPos.applyMatrix4(m__);
+                obj.position.x = newPos.x
+                obj.position.y = newPos.y
+                obj.position.z = newPos.z
+                return newPos
+            }
+        }
+        )
+
+        // explore data info 
+        const vm = new Vue({
+            el: '#app',
+            data: {
+                r: 20,
+                nodes: [],
+                nodeList: [],
+                links: [],
+                matrix: [],
+                width: 0,
+                height: 0,
+                circleFill: '#C2D4F8',
+                egoNodeFill: '#FC9634',
+                chooseNode: null,
+            },
+            methods: {
+                drawBarChart() {
+                    let source = []
+                    source.push(['layer', 'node size', 'edge size'])
+                    this.layers.forEach((d, i) => {
+                        source.push([d, this.layerNodes[i]['nums'], this.layerEdges[i]])
+                    })
+                    var barChart = echarts.init(document.getElementById('barChart'));
+                    option = {
+                        color: ['#C2D4F8', '#6C8FF8'],
+                        legend: {
+                            textStyle: {
+                                fontSize: 14,//font size
+                            },
+                        },
+                        tooltip: {},
+                        title: {
+                            text: 'Layer Info'
+                        },
+                        dataset: {
+                            source
+                        },
+                        xAxis: { type: 'category' },
+                        yAxis: {},
+                        // Declare several bar series, each will be mapped
+                        // to a column of dataset.source by default.
+                        series: [
+                            { type: 'bar' },
+                            { type: 'bar' },
+                        ]
+                    };
+                    barChart.setOption(option);
+                },
+                handleCellClick(row, column, cell, event) {
+                    this.chooseNode = row
+                },
+                scale(pos, widthDomain, heightDomain, xExtent, yExtent) {
+                    let [xmin_, xmax_] = widthDomain
+                    xmin_ += (xmax_ - xmin_) * 0.2
+                    xmax_ -= (xmax_ - xmin_) * 0.1
+                    let [ymin_, ymax_] = heightDomain
+                    let [xmin, xmax] = xExtent
+                    let [ymin, ymax] = yExtent
+                    // console.log('heightDomain', heightDomain);
+                    let [x, y, z] = pos
+                    let xpos = (x - xmin) / (xmax - xmin) * (xmax_ - xmin_) + xmin_
+                    let ypos = (y - ymin) / (ymax - ymin) * (ymax_ - ymin_) + ymin_
+                    // console.log(`x:${x},xmin:${xmin}, xmax - xmin:${xmax - xmin}, xpos:${xpos}`);
+                    // console.log(`y:${y},ymin:${ymin}, ymax - ymin:${ymax - ymin}, xpos:${ypos}`);
+                    return [xpos, ypos]
+                },
+                singleNetPos(chooseNode, widthDomain, heightDomain) {
+                    let nodePos = []
+                    let edgePos = []
+                    let nodeId = chooseNode['layerId'] + '-' + chooseNode['id']
+                    let source = _.find(this.nodeList, { 'id': nodeId })
+                    let links = chooseNode['links'].map(d => chooseNode['layerId'] + '-' + d)
+                    nodePos.push({ nodeId: chooseNode['id'], pos: source['pos'], fill: this.egoNodeFill })
+                    links.forEach((d, i) => {
+                        let target = _.find(this.nodeList, { 'id': d })
+                        let id = parseInt(d.split('-')[1])
+                        nodePos.push({ nodeId: id, pos: target['pos'], fill: this.circleFill })
+                        edgePos.push({ source: Object.assign({}, source), target: Object.assign({}, target) })
+                    })
+                    let xExtent = d3.extent(nodePos, d => d['pos'][0])
+                    let yExtent = d3.extent(nodePos, d => d['pos'][1])
+                    heightDomain = [this.height * 0.3, this.height * 0.8]
+                    nodePos.forEach(d => {
+                        d['pos'] = this.scale(d['pos'], widthDomain, heightDomain, xExtent, yExtent)
+                    })
+                    edgePos.forEach(d => {
+                        d['source']['pos'] = this.scale(d['source']['pos'], widthDomain, heightDomain, xExtent, yExtent)
+                        d['target']['pos'] = this.scale(d['target']['pos'], widthDomain, heightDomain, xExtent, yExtent)
+
+                    })
+                    // edgePos
+                    return { nodePos, edgePos }
+                },
+                layoutDomain(circleData) {
+                    let len
+                    if ('children' in circleData) {
+                        len = circleData['children'].length
+                    } else {
+                        len = 1
+                    }
+                    let paddingWidth = this.width * 0.03
+                    let paddingheight = this.height * 0.03
+                    let widthDomain = []
+                    let heightDomain = []
+                    let widthStep = (this.width - 2 * paddingWidth) / len
+                    let heightStep = (this.height - 2 * paddingheight) / len
+                    for (let i = 0; i < len; i++) {
+                        widthDomain.push([paddingWidth + i * widthStep, paddingWidth + (i + 1) * widthStep])
+                        heightDomain.push([paddingheight + i * heightStep, paddingheight + (i + 1) * heightStep])
+                    }
+                    return { widthDomain, heightDomain }
+                },
+                textPosTf(circle) {
+                    let textLen = String(circle['nodeId']).length
+                    let pos = circle['pos']
+                    // 
+                    if (textLen == 1) {
+                        pos[0] -= 4
+                        pos[1] += 3
+                    }
+                    else if (textLen == 2) {
+                        pos[0] -= 8
+                        pos[1] += 3
+                    }
+                    else if (textLen == 3) {
+                        pos[0] -= 12
+                        pos[1] += 3
+                    }
+                    return pos
+                },
+            },
+            async mounted() {
+                let { nodes, links, matrix } = await fetchAllData()
+                this.nodes = nodes
+                this.nodeList = _.flatten(this.nodes.map(d => d['list']))
+                this.links = links
+                this.matrix = matrix
+                this.drawBarChart()
+                // this.width = this.$refs.barsvg.getBoundingClientRect().width;
+                this.width = this.$refs.egoNetsvg.getBoundingClientRect().width;
+                // this.height = this.$refs.barsvg.getBoundingClientRect().height;
+                this.height = this.$refs.egoNetsvg.getBoundingClientRect().height;
+            },
+            computed: {
+                layerNodes() {
+                    let layerNodes = [], layerEdges = []
+                    this.nodes.forEach(({ name, ids }, idx) => {
+                        layerNodes.push({ name, ids, layer: idx + 1, nums: ids.length })
+                    })
+                    return layerNodes
+                },
+                layers() {
+                    let layers = this.layerNodes.map(d => d['name'])
+                    return layers
+                },
+                layerEdges() {
+                    let layerEdges = []
+                    let layers = this.layerNodes.map(d => d['layer'])
+                    this.links.forEach(({ source, target }) => {
+                        let curLayerEdges = []
+                        let sourceLayer = parseInt(source.split('-')[0])
+                        let targetLayer = parseInt(target.split('-')[0])
+                        if (sourceLayer == targetLayer && layers.indexOf(sourceLayer) != -1) {
+                            if (!layerEdges[sourceLayer - 1]) {
+                                layerEdges[sourceLayer - 1] = [{ source, target }]
+                            } else {
+                                layerEdges[sourceLayer - 1].push({ source, target })
+                            }
+                        }
+
+                    })
+                    return layerEdges.map(d => d.length)
+                },
+                rects() {
+                    let layerNodes = [], layerEdges = []
+                    this.nodes.forEach(({ name, ids }, idx) => {
+                        layerNodes.push({ name, ids, layer: idx + 1, nums: ids.length })
+                    })
+                    let layers = layerNodes.map(d => d['layer'])
+                    this.links.forEach(({ source, target }) => {
+                        let curLayerEdges = []
+                        let sourceLayer = parseInt(source.split('-')[0])
+                        let targetLayer = parseInt(target.split('-')[0])
+                        if (sourceLayer == targetLayer && layers.indexOf(sourceLayer) != -1) {
+                            if (!layerEdges[sourceLayer - 1]) {
+                                layerEdges[sourceLayer - 1] = [{ source, target }]
+                            } else {
+                                layerEdges[sourceLayer - 1].push({ source, target })
+                            }
+                        }
+                    })
+                    // this.layerEdges = d3.map(layerEdges, d => d.length)
+                    let barPos = []
+                    let nodeSizeExtent = d3.extent(layerNodes, d => d.nums)
+                    let edgeSizeExtent = d3.extent(layerEdges, d => d.length)
+                    let domain = d3.extent(nodeSizeExtent.concat(edgeSizeExtent))
+                    let scale = d3.scale
+                        .linear()
+                        .domain(domain)
+                        .range([this.height * 0.2, this.height * 0.85]);
+                    let leftPaddingWidth = this.width * 0.2
+                    let step = this.width * 0.04
+                    let barWidth = this.width * 0.05
+                    let barPaddingWidth = this.width * 0.01
+                    layerNodes.forEach(({ nums }, i) => {
+                        let edgeNums = layerEdges[i].length
+                        barPos.push({
+                            x: leftPaddingWidth + i * (2 * barWidth + step),
+                            y: this.height * 0.9 - scale(nums),
+                            width: barWidth,
+                            height: scale(nums),
+                            fill: '#C7E5C0'
+                        })
+                        barPos.push({
+                            x: leftPaddingWidth + i * (2 * barWidth + step) + barWidth + barPaddingWidth,
+                            y: this.height * 0.9 - scale(edgeNums),
+                            width: barWidth,
+                            height: scale(edgeNums),
+                            fill: '#D4D4D4'
+                        })
+                    })
+                    return barPos
+                },
+                tableData() {
+                    let tableData = new Map()
+                    let nodes = new Set()
+                    let layers = new Map()
+                    // tableData: [{node,[ layer, inDegree, outDegree, links:[]]} ]
+                    this.nodes.forEach(({ ids, name }, i) => {
+                        layers.set(i + 1, name)
+                        ids.forEach(d => {
+                            if (!tableData.has(d)) {
+                                tableData.set(d, [{ layer: i + 1, Degree: 0, links: [], weight: 0 }])
+                            } else {
+                                tableData.get(d).push({ layer: i + 1, Degree: 0, links: [], weight: 0 })
+                            }
+                        })
+                        nodes.add(ids)
+                    })
+
+                    let linkMap = new Map()
+                    // linkMap:(layer-node, [neighbors])
+                    this.matrix.forEach((l, i) => {
+                        l.forEach((d, ii) => {
+                            if (d != 0) {
+                                d.forEach(layer => {
+                                    let k = `${layer}-${i}`
+                                    if (!linkMap.has(k)) {
+                                        linkMap.set(k, [ii])
+                                    }
+                                    else {
+                                        linkMap.get(k).push(ii)
+                                    }
+                                })
+                            }
+                        })
+                    })
+                    let linkList = []
+                    for (const [k, v] of tableData) {
+                        v.forEach(d => {
+                            let kk = `${d['layer']}-${k}`
+                            if (linkMap.has(kk)) {
+                                d['links'] = linkMap.get(kk)
+                                d['Degree'] = linkMap.get(kk).length
+                                // d['weight'] = 0
+
+                                d['weight'] = d3.sum(d['links'].map(neighbor => {
+                                    let e = _.find(this.links, { 'source': kk, 'target': `${d['layer']}-${neighbor}` }) || _.find(this.links, { 'source': `${d['layer']}-${neighbor}`, 'target': kk })
+                                    return e['weight']
+                                }))
+                            }
+                            linkList.push({ id: k, layerId: d['layer'], layer: layers.get(d['layer']), Degree: d['Degree'], links: d['links'], links_: d['links'].join(', '), weight: d['weight'] })
+                        })
+                    }
+                    linkList = _.orderBy(linkList, ['id', 'layerId'], ['asc', 'asc']);
+                    let newLinkList = []
+                    for (let i = 0; i < linkList.length; i++) {
+                        let cur = linkList[i]
+                        let children = null
+                        if (i + 1 < linkList.length) {
+                            children = linkList[i + 1]['id'] == cur['id'] ? [cur] : null
+                        }
+                        while (i + 1 < linkList.length && linkList[i + 1]['id'] == cur['id']) {
+                            children.push(linkList[i + 1])
+                            i += 1
+                        }
+                        if (children) {
+                            let layer = children.map(d => d['layer'])
+                            let Degree = d3.sum(children, d => d['Degree'])
+                            let weight = d3.sum(children, d => d['weight'])
+                            let links_ = _.flatten(children.map(d => d['links']))
+                            if (links_.length > 5) {
+                                links_ = links_.slice(0, 5)
+                                links_.push('...')
+                            }
+                            links_ = links_.join(', ')
+                            let parent = { id: children[0]['id'], layer: layer.join(', '), Degree, weight, links_, children }
+                            newLinkList.push(parent)
+                        } else {
+                            newLinkList.push(cur)
+                        }
+                    }
+                    let i = 0
+                    // add id_ as the key attribution in el-table
+                    newLinkList.forEach(d => {
+                        d['id_'] = i
+                        i += 1
+                        if ('children' in d) {
+                            d['children'].forEach(dd => {
+                                dd['id_'] = i
+                                i += 1
+                            })
+                        }
+                    })
+                    // console.log('newLinkList', newLinkList);
+                    return newLinkList
+                },
+                circleData() {
+                    let circleData = []
+                    // text pos
+                    if (this.chooseNode) {
+                        let { widthDomain, heightDomain } = this.layoutDomain(this.chooseNode)
+                        let textPos = []
+                        if ('children' in this.chooseNode) {
+                            // mutlple net
+                            let layers_ = this.chooseNode['layer'].split(', ')
+                            this.chooseNode['children'].forEach((singleNet, i) => {
+                                let x = widthDomain[i][0] + (widthDomain[i][1] - widthDomain[i][0]) / 2
+                                textPos.push({ layer: layers_[i], pos: [x, this.height * 0.1] })
+                                let { nodePos, edgePos } = this.singleNetPos(singleNet, widthDomain[i], heightDomain[i])
+                                circleData.push({ layer: singleNet['layer'], nodePos, edgePos, textPos })
+                            })
+                        } else {
+                            // sigle net
+                            let x = widthDomain[0][0] + (widthDomain[0][1] - widthDomain[0][0]) / 2
+                            textPos.push({ layer: this.layers[this.chooseNode['layerId'] - 1], pos: [x, this.height * 0.1] })
+                            let { nodePos, edgePos } = this.singleNetPos(this.chooseNode, widthDomain[0], heightDomain[0])
+                            circleData.push({ layer: this.chooseNode['layer'], nodePos, edgePos, textPos })
+                        }
+                    }
+                    let nodePos = _.flatten(circleData.map(d => d['nodePos']))
+                    let edgePos = _.flatten(circleData.map(d => d['edgePos']))
+                    let textPos = _.flatten(circleData.map(d => d['textPos']))
+                    // console.log('textPos', textPos);
+                    return { nodePos, edgePos, textPos }
+                },
+
+            }
+        })
+    </script>
+
+</body>
+
+</html>
