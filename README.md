@@ -14,7 +14,7 @@
 
 Multilayer-network-2.5D view can effectively present the topology of the data. we aggregate data from different layers, and then use Fruchterman-Reingold algorithm to layout, this way can ensure consistency between the layers. we also provide rich interaction ways like rotation、emphasization to observe the data better.
 
-#### bar chart
+#### Bar chart
 
 bar chart present multilayer-network's layer information, included node numbers and edges numbers.
 
