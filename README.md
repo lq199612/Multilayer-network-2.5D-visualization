@@ -24,4 +24,4 @@ when click the row in the Table view , Ego network view will show the chosen nod
 
 #### Table view 
 
-Table view present detailed multilayer-network information, it's column attributes has node ID 、layer 、degree（degree sum if node has children node）、weight (weight sum)、neighbor node . And you can sort the table according to those column attributes.
+Table view present detailed multilayer-network information, it's column attributes has node ID 、layer 、degree（or degree sum if node has children node）、weight (or weight sum)、neighbor node . And you can sort the table according to those column attributes.
