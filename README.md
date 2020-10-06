@@ -16,7 +16,7 @@ Multilayer-network-2.5D view can effectively present the topology of the data. w
 
 #### Bar chart
 
-bar chart present multilayer-network's layer information, included node numbers and edges numbers.
+bar chart present multilayer-network's layer information, included node numbers and edges numbers of each layer.
 
 #### Ego network view 
 
