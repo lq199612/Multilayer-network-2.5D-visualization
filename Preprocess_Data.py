@@ -48,8 +48,6 @@ def matrix(nodes_df, edges_df):
         else:
             mx[row['nodeID_']][row['nodeID']].append(row['layerID'])
     return mx
-
-
 mx = matrix(nodes_df, edges_df)
 
 # %%
@@ -64,7 +62,7 @@ for n in net.iter_nodes():
         all_nodes[n] = idx
         idx += 1
 
-# %% 求所有边
+# %% 布局得到2D坐标
 edges = set()
 for e in all_edges:
     if ((e[0], e[1]) not in edges) and ((e[1], e[0]) not in edges):
@@ -74,10 +72,9 @@ g.add_nodes_from(list(all_nodes.values()))
 g.add_edges_from(edges)
 pos = nx.spring_layout(g)
 
-# %%
+# %% 转为3D坐标
 to3d_nodes = []
 to3d_edges = []
-
 
 def normalize_pos(pos, boxSize=[1, 1]):
     x = []
@@ -92,7 +89,6 @@ def normalize_pos(pos, boxSize=[1, 1]):
     for k in pos:
         pos[k][0] = (pos[k][0] - minX) / (maxX-minX) * boxSize[0]
         pos[k][1] = (pos[k][1] - minY) / (maxY-minY) * boxSize[1]
-
 
 for k in pos:
     pos[k] = pos[k].tolist()
@@ -119,12 +115,12 @@ for k in layers:
             target = all_nodes[e[1]]
             layer_edges.append(
                 {'source': str(k)+'-'+str(source), 'target': str(k)+'-'+str(target)})
-
     idx += 1
     layers_info[layer] = {'nodes': layer_nodes, 'edges': layer_edges}
     to3d_nodes.append({'list': layer_nodes, 'name': layers[k], 'ids': ids})
     to3d_edges.extend(layer_edges)
-# %% 相邻层同id节点的边
+    
+# %% 添加相邻层同id节点的边
 for idx, p in enumerate(to3d_nodes):
     if idx+1 < len(to3d_nodes):
         cur = set(p['ids'])
@@ -134,7 +130,6 @@ for idx, p in enumerate(to3d_nodes):
             nn = all_nodes[n]
             to3d_edges.append(
                 {'source': str(idx+1)+'-'+str(nn), 'target': str(idx+2)+'-'+str(nn)})
-
 
 # %% 为边增加weight信息
 to3d_edges_ = copy.deepcopy(to3d_edges)
@@ -149,10 +144,7 @@ for e in to3d_edges_:
     else:
         e['weight'] = 0
 
-
-# %%
-
-
+# %% 
 class NpEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, np.integer):
@@ -177,7 +169,7 @@ def write_dict(d, file_path):
     fileObject.write(jsObj)
 
 
-# %%
+# %% 存文件
 write_dict(to3d_nodes, './data/london_station_nodes.json')
 write_dict(to3d_edges_, './data/london_station_edges.json')
 write_dict(mx, './data/matrix.json')
