@@ -1,9 +1,9 @@
 # Multilayer-network-2.5D-visualization
-> explore Multilayer network via 2.5D visualization based on threejs &amp; vuejs &amp; echartjs &amp; d3js &amp;elementUI
+> explore Multilayer network via 2.5D visualization based on threejs &amp; vuejs &amp; echartjs &amp; d3js &amp; elementUI
 
 #### Run step
 
-+ First  preprocess the source data by run the `Preprocess_Data.py`, which was collected in 2013 from the official website of Transport for London (<https://www.tfl.gov.uk/>) and manually cross-checked. see more complex multilayer networks dataset in this website(https://comunelab.fbk.eu/) .
++ First  preprocess the source data by run the `Preprocess_Data.py`, the data was collected in 2013 from the official website of Transport for London (<https://www.tfl.gov.uk/>) and manually cross-checked. see more complex multilayer networks dataset in this website(https://comunelab.fbk.eu/) .
 + Then your PC need to install a web server, like Apache (recommended)、Tomcat、IIS.
 
 + If you have installed the Apache HTTP Server, you can put this poject in the `htdocs`  file directory， then you can run the `Multilayer_network.html`
